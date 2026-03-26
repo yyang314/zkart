@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Z-Kart</title>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #000814;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ─── Constants ───────────────────────────────────────────────────────────────
+const W = 320, H = 480;
+const SEG_H = 4;
+const SHIP_W = 10, SHIP_H = 14;
+const SHIP_Y = H - 90;
+
+const INIT_TUNNEL_W = 220;
+const MIN_TUNNEL_W  = 55;
+const INIT_SPEED    = 2.5;
+const MAX_SPEED     = 4.5;
+const SHIP_SPD      = 3.5;
+
+// ─── Canvas ──────────────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx    = canvas.getContext('2d');
+canvas.width  = W;
+canvas.height = H;
+
+function resize() {
+  const s = Math.min(window.innerWidth / W, window.innerHeight / H);
+  canvas.style.width  = (W * s) + 'px';
+  canvas.style.height = (H * s) + 'px';
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ─── State ───────────────────────────────────────────────────────────────────
+let state; // 'title' | 'playing' | 'gameover'
+let score, shipX, speed, tunnelW, frameCount, driftVel;
+let segments = [];
+let keys = {};
+let highScore = parseInt(localStorage.getItem('zkart_hs') || '0');
+
+// ─── Stars ───────────────────────────────────────────────────────────────────
+const stars = Array.from({ length: 70 }, () => ({
+  x: Math.random() * W,
+  y: Math.random() * H,
+  r: Math.random() < 0.85 ? 1 : 2,
+  a: 0.2 + Math.random() * 0.6
+}));
+
+function updateStars() {
+  for (const s of stars) {
+    s.y += speed * 0.25;
+    if (s.y > H) { s.y -= H; s.x = Math.random() * W; }
+  }
+}
+
+function drawStars() {
+  for (const s of stars) {
+    ctx.fillStyle = `rgba(180,210,255,${s.a})`;
+    ctx.fillRect(s.x, s.y, s.r, s.r);
+  }
+}
+
+// ─── Audio ───────────────────────────────────────────────────────────────────
+let audioCtx;
+let eng = {}; // engine nodes
+
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+
+function startEngine() {
+  if (!audioCtx || eng.osc1) return;
+
+  const master = audioCtx.createGain();
+  master.gain.value = 0.07;
+  master.connect(audioCtx.destination);
+
+  // Primary oscillator — sawtooth for that spaceship rumble
+  const osc1 = audioCtx.createOscillator();
+  osc1.type = 'sawtooth';
+  osc1.frequency.value = 90;
+
+  // Detuned companion — fattens the sound
+  const osc2 = audioCtx.createOscillator();
+  osc2.type = 'square';
+  osc2.frequency.value = 94;
+
+  // LFO — rhythmic wobble like an ion drive
+  const lfo = audioCtx.createOscillator();
+  lfo.type = 'sine';
+  lfo.frequency.value = 4;
+  const lfoAmt = audioCtx.createGain();
+  lfoAmt.gain.value = 5;
+  lfo.connect(lfoAmt);
+  lfoAmt.connect(osc1.frequency);
+  lfoAmt.connect(osc2.frequency);
+
+  const g1 = audioCtx.createGain(); g1.gain.value = 0.6;
+  const g2 = audioCtx.createGain(); g2.gain.value = 0.4;
+  osc1.connect(g1); g1.connect(master);
+  osc2.connect(g2); g2.connect(master);
+
+  osc1.start(); osc2.start(); lfo.start();
+  eng = { osc1, osc2, lfo, lfoAmt, master };
+}
+
+function stopEngine() {
+  if (!eng.osc1) return;
+  try { eng.osc1.stop(); eng.osc2.stop(); eng.lfo.stop(); } catch(e) {}
+  eng = {};
+}
+
+function setEnginePitch(spd) {
+  if (!eng.osc1) return;
+  const t = audioCtx.currentTime;
+  const f = 75 + spd * 13;
+  eng.osc1.frequency.setTargetAtTime(f,     t, 0.08);
+  eng.osc2.frequency.setTargetAtTime(f + 5, t, 0.08);
+  eng.lfo.frequency.setTargetAtTime(3.5 + spd * 0.35, t, 0.1);
+}
+
+function playCrash() {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+
+  // Noise burst — hull impact
+  const rate = audioCtx.sampleRate;
+  const len  = Math.floor(rate * 0.7);
+  const buf  = audioCtx.createBuffer(1, len, rate);
+  const d    = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 0.4);
+  const noise = audioCtx.createBufferSource();
+  noise.buffer = buf;
+  const ng = audioCtx.createGain(); ng.gain.value = 0.3;
+  noise.connect(ng); ng.connect(audioCtx.destination);
+  noise.start(t);
+
+  // Descending pitch sweep — engine dying
+  const sweep = audioCtx.createOscillator();
+  sweep.type = 'sawtooth';
+  sweep.frequency.setValueAtTime(480, t);
+  sweep.frequency.exponentialRampToValueAtTime(28, t + 1.0);
+  const sg = audioCtx.createGain();
+  sg.gain.setValueAtTime(0.22, t);
+  sg.gain.exponentialRampToValueAtTime(0.001, t + 1.0);
+  sweep.connect(sg); sg.connect(audioCtx.destination);
+  sweep.start(t); sweep.stop(t + 1.0);
+}
+
+function playStart() {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  // Ascending 4-note arpeggio — powering up
+  [[220, 0], [330, 0.09], [440, 0.18], [660, 0.27]].forEach(([freq, delay]) => {
+    const osc = audioCtx.createOscillator();
+    const g   = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(0, t + delay);
+    g.gain.linearRampToValueAtTime(0.1, t + delay + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.18);
+    osc.connect(g); g.connect(audioCtx.destination);
+    osc.start(t + delay); osc.stop(t + delay + 0.18);
+  });
+}
+
+function playMilestone() {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  // Two-note chime
+  [[523, 0], [784, 0.13]].forEach(([freq, delay]) => {
+    const osc = audioCtx.createOscillator();
+    const g   = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = freq;
+    g.gain.setValueAtTime(0, t + delay);
+    g.gain.linearRampToValueAtTime(0.09, t + delay + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.22);
+    osc.connect(g); g.connect(audioCtx.destination);
+    osc.start(t + delay); osc.stop(t + delay + 0.22);
+  });
+}
+
+// ─── Tunnel ───────────────────────────────────────────────────────────────────
+function initTunnel() {
+  segments  = [];
+  tunnelW   = INIT_TUNNEL_W;
+  speed     = INIT_SPEED;
+  frameCount = 0;
+  score     = 0;
+  driftVel  = 0;
+
+  let cx = W / 2;
+  const count = Math.ceil(H / SEG_H) + 30;
+  for (let i = 0; i < count; i++) {
+    segments.push({ left: cx - tunnelW / 2, right: cx + tunnelW / 2, y: H - i * SEG_H });
+  }
+}
+
+function addSegment() {
+  const top = segments[segments.length - 1];
+  const turnAccel = Math.min(1.4, 0.2 + frameCount * 0.004);
+  const maxDrift  = Math.min(7,   1.0 + frameCount * 0.003);
+  driftVel += (Math.random() - 0.5) * turnAccel * 2;
+  driftVel *= 0.90;
+  driftVel  = Math.max(-maxDrift, Math.min(maxDrift, driftVel));
+  const hw  = tunnelW / 2;
+  const cx  = Math.max(hw + 10, Math.min(W - hw - 10, (top.left + top.right) / 2 + driftVel));
+  segments.push({ left: cx - hw, right: cx + hw, y: top.y - SEG_H });
+}
+
+function updateTunnel() {
+  frameCount++;
+  score = Math.floor(frameCount / 60);
+
+  tunnelW = Math.max(MIN_TUNNEL_W, INIT_TUNNEL_W - frameCount * 0.025);
+  speed   = Math.min(MAX_SPEED, INIT_SPEED + frameCount * 0.0008);
+  setEnginePitch(speed);
+
+  for (const s of segments) s.y += speed;
+  while (segments.length && segments[0].y > H + SEG_H) segments.shift();
+  while (segments[segments.length - 1].y > -SEG_H) addSegment();
+}
+
+// ─── Ship ─────────────────────────────────────────────────────────────────────
+function initShip() { shipX = W / 2; }
+
+function updateShip() {
+  if (keys.ArrowLeft)  shipX -= SHIP_SPD;
+  if (keys.ArrowRight) shipX += SHIP_SPD;
+  shipX = Math.max(SHIP_W / 2, Math.min(W - SHIP_W / 2, shipX));
+}
+
+// ─── Collision ────────────────────────────────────────────────────────────────
+function checkCollision() {
+  const top = SHIP_Y - SHIP_H / 2, bot = SHIP_Y + SHIP_H / 2;
+  const lx  = shipX - SHIP_W / 2,  rx  = shipX + SHIP_W / 2;
+  for (const s of segments) {
+    if (s.y + SEG_H < top || s.y > bot) continue;
+    if (lx < s.left || rx > s.right) return true;
+  }
+  return false;
+}
+
+// ─── Drawing ──────────────────────────────────────────────────────────────────
+function drawShip(x, y) {
+  // Thruster flames — flicker orange/yellow
+  const flameOn = Math.random() > 0.35;
+  if (flameOn) {
+    ctx.fillStyle = '#ffd60a';
+    ctx.fillRect(x - 2, y + 7, 1, 2 + Math.floor(Math.random() * 3));
+    ctx.fillRect(x + 1, y + 7, 1, 2 + Math.floor(Math.random() * 3));
+  }
+  ctx.fillStyle = '#f77f00';
+  ctx.fillRect(x - 2, y + 4, 1, 3);
+  ctx.fillRect(x + 1, y + 4, 1, 3);
+
+  // Hull — light cyan-blue
+  ctx.fillStyle = '#90e0ef';
+  ctx.fillRect(x - 1, y - 7, 2, 3);   // nose
+  ctx.fillRect(x - 3, y - 4, 6, 8);   // body
+  ctx.fillRect(x - 6, y + 1, 4, 3);   // left wing
+  ctx.fillRect(x + 2, y + 1, 4, 3);   // right wing
+
+  // Cockpit highlight
+  ctx.fillStyle = '#caf0f8';
+  ctx.fillRect(x - 1, y - 3, 2, 3);
+}
+
+function drawTunnel() {
+  for (const s of segments) {
+    // Depth-tinted rock fill (darker far away, slightly brighter near player)
+    const t  = Math.max(0, Math.min(1, s.y / H));
+    const r  = Math.floor(6  + t * 14);
+    const g  = Math.floor(12 + t * 22);
+    const b  = Math.floor(30 + t * 45);
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    if (s.left > 0)  ctx.fillRect(0,      s.y, s.left,      SEG_H);
+    if (s.right < W) ctx.fillRect(s.right, s.y, W - s.right, SEG_H);
+
+    // Neon inner-edge glow — brighter near player
+    const ea = (0.45 + t * 0.55).toFixed(2);
+    ctx.fillStyle = `rgba(0,212,255,${ea})`;
+    if (s.left  > 1)     ctx.fillRect(s.left  - 1, s.y, 1, SEG_H);
+    if (s.right < W - 1) ctx.fillRect(s.right,     s.y, 1, SEG_H);
+  }
+}
+
+function drawHUD() {
+  ctx.font = '6px "Press Start 2P"';
+  ctx.fillStyle = '#00ff88';
+  ctx.textAlign = 'left';
+  ctx.fillText('SCORE ' + String(score).padStart(5, '0'), 8, 16);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#ffd60a';
+  ctx.fillText('BEST  ' + String(highScore).padStart(5, '0'), W - 8, 16);
+}
+
+function drawScanlines() {
+  ctx.fillStyle = 'rgba(0,0,0,0.13)';
+  for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
+  const vg = ctx.createRadialGradient(W/2, H/2, H * 0.25, W/2, H/2, H * 0.82);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.5)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// ─── Screens ──────────────────────────────────────────────────────────────────
+function drawTitle() {
+  ctx.fillStyle = '#000814';
+  ctx.fillRect(0, 0, W, H);
+  drawStars();
+
+  // Background tunnel decoration
+  const tw = 180, tc = W / 2;
+  for (let y = 0; y < H; y += SEG_H * 5) {
+    const t = Math.max(0, Math.min(1, y / H));
+    ctx.fillStyle = `rgb(${Math.floor(6+t*14)},${Math.floor(12+t*22)},${Math.floor(30+t*45)})`;
+    ctx.fillRect(0, y, tc - tw / 2, SEG_H * 4);
+    ctx.fillRect(tc + tw / 2, y, W - (tc + tw / 2), SEG_H * 4);
+    ctx.fillStyle = `rgba(0,212,255,${(0.45+t*0.55).toFixed(2)})`;
+    ctx.fillRect(tc - tw / 2 - 1, y, 1, SEG_H * 4);
+    ctx.fillRect(tc + tw / 2,     y, 1, SEG_H * 4);
+  }
+
+  // Panel
+  ctx.fillStyle = 'rgba(0,8,20,0.92)';
+  ctx.fillRect(18, 72, W - 36, 236);
+  ctx.strokeStyle = '#00d4ff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(18, 72, W - 36, 236);
+
+  // Title
+  ctx.fillStyle = '#00d4ff';
+  ctx.textAlign = 'center';
+  ctx.font = '22px "Press Start 2P"';
+  ctx.fillText('Z-KART', W / 2, 115);
+
+  // Subtitle
+  ctx.fillStyle = '#90e0ef';
+  ctx.font = '6px "Press Start 2P"';
+  ctx.fillText('STEER THROUGH THE', W / 2, 148);
+  ctx.fillText('NARROWING CAVE!', W / 2, 164);
+
+  ctx.fillStyle = '#90e0ef';
+  ctx.font = '6px "Press Start 2P"';
+  ctx.fillText('\u2190 \u2192  ARROW KEYS', W / 2, 196);
+
+  ctx.fillStyle = '#ffd60a';
+  ctx.font = '7px "Press Start 2P"';
+  ctx.fillText('BEST: ' + String(highScore).padStart(5, '0'), W / 2, 272);
+
+  if (Math.floor(Date.now() / 600) % 2 === 0) {
+    ctx.fillStyle = '#00ff88';
+    ctx.font = '6px "Press Start 2P"';
+    ctx.fillText('PRESS ANY KEY', W / 2, 362);
+  }
+
+  drawScanlines();
+}
+
+function drawGame() {
+  ctx.fillStyle = '#000814';
+  ctx.fillRect(0, 0, W, H);
+  drawStars();
+  drawTunnel();
+  drawShip(Math.round(shipX), SHIP_Y);
+  drawHUD();
+
+  // Warning flash when tunnel is very narrow
+  if (tunnelW < MIN_TUNNEL_W * 1.4 && Math.floor(Date.now() / 300) % 2 === 0) {
+    ctx.fillStyle = 'rgba(255,50,50,0.06)';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  drawScanlines();
+}
+
+function drawGameOver() {
+  drawGame();
+
+  ctx.fillStyle = 'rgba(0,4,12,0.82)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = 'center';
+
+  ctx.fillStyle = '#ff4444';
+  ctx.font = '14px "Press Start 2P"';
+  ctx.fillText('GAME OVER', W / 2, 150);
+
+  // Big score
+  ctx.fillStyle = '#00ff88';
+  ctx.font = '28px "Press Start 2P"';
+  ctx.fillText(String(score).padStart(5, '0'), W / 2, 210);
+
+  ctx.fillStyle = '#90e0ef';
+  ctx.font = '6px "Press Start 2P"';
+  ctx.fillText('SECONDS SURVIVED', W / 2, 230);
+
+  ctx.font = '7px "Press Start 2P"';
+  if (score > 0 && score >= highScore) {
+    ctx.fillStyle = '#ffd60a';
+    ctx.fillText('NEW HIGH SCORE!', W / 2, 265);
+  } else {
+    ctx.fillStyle = '#ffd60a';
+    ctx.fillText('BEST: ' + String(highScore).padStart(5, '0'), W / 2, 265);
+  }
+
+  if (Math.floor(Date.now() / 600) % 2 === 0) {
+    ctx.fillStyle = '#00ff88';
+    ctx.font = '6px "Press Start 2P"';
+    ctx.fillText('PRESS ANY KEY', W / 2, 310);
+  }
+
+  drawScanlines();
+}
+
+// ─── Game Flow ────────────────────────────────────────────────────────────────
+let lastScoreMilestone = -1;
+
+function startGame() {
+  initAudio();
+  initTunnel();
+  initShip();
+  lastScoreMilestone = -1;
+  state = 'playing';
+  playStart();
+  setTimeout(startEngine, 400); // engine starts after arpeggio
+}
+
+function endGame() {
+  stopEngine();
+  playCrash();
+  if (score > highScore) {
+    highScore = score;
+    localStorage.setItem('zkart_hs', highScore);
+  }
+  state = 'gameover';
+}
+
+// ─── Main Loop ────────────────────────────────────────────────────────────────
+function loop() {
+  if (state === 'title') {
+    drawTitle();
+  } else if (state === 'playing') {
+    updateTunnel();
+    updateStars();
+    updateShip();
+    drawGame();
+    if (checkCollision()) endGame();
+    const milestone = Math.floor(score / 10);
+    if (milestone > lastScoreMilestone && score > 0) {
+      lastScoreMilestone = milestone;
+      playMilestone();
+    }
+  } else if (state === 'gameover') {
+    drawGameOver();
+  }
+  requestAnimationFrame(loop);
+}
+
+// ─── Input ────────────────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key)) e.preventDefault();
+  keys[e.key] = true;
+  if      (state === 'title')    startGame();
+  else if (state === 'gameover') state = 'title';
+});
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+state = 'title';
+loop();
+</script>
+</body>
+</html>
