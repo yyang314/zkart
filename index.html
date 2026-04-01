@@ -85,48 +85,56 @@ function drawStars() {
 }
 
 // ─── Audio ───────────────────────────────────────────────────────────────────
-let audioCtx;
-let eng = {}; // engine nodes
+let audioCtx, compressor;
+let eng = {};
+
+// ── Music state ──
+const BPM      = 132;
+const STEP_DUR = 60 / BPM / 4; // 16th note in seconds
+
+let musicTimer = null, musicStep = 0, nextBeat = 0;
+let arpDelay = null, arpFeedback = null;
+let padNodes = [];
+
+// ── Sequencer patterns (16 steps, 0 = rest) ──
+const P_KICK  = [1,0,0,0, 1,0,0,0, 1,0,0,0, 1,0,0,0];
+const P_SNARE = [0,0,0,0, 1,0,0,0, 0,0,0,0, 1,0,0,0];
+const P_CHAT  = [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0]; // closed hat (8ths)
+const P_OHAT  = [0,0,0,0, 0,0,1,0, 0,0,0,0, 0,0,1,0]; // open hat offbeat
+// Bass: A2 D2 E2 G2 (A minor)
+const P_BASS  = [110,0,0,110, 0,0,110,0, 73.4,0,0,110, 0,82.4,0,98];
+// Arp: A minor pentatonic ascending/descending
+const P_ARP   = [440,0,659,0, 880,0,784,0, 659,0,587,0, 523,0,440,0];
 
 function initAudio() {
   if (audioCtx) return;
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  audioCtx   = new (window.AudioContext || window.webkitAudioContext)();
+  compressor = audioCtx.createDynamicsCompressor();
+  compressor.threshold.value = -8;
+  compressor.ratio.value     = 4;
+  compressor.attack.value    = 0.002;
+  compressor.release.value   = 0.15;
+  compressor.connect(audioCtx.destination);
 }
 
+function dst() { return compressor; }
+
+// ── Engine (subtle under music) ──
 function startEngine() {
   if (!audioCtx || eng.osc1) return;
-
-  const master = audioCtx.createGain();
-  master.gain.value = 0.07;
-  master.connect(audioCtx.destination);
-
-  // Primary oscillator — sawtooth for that spaceship rumble
-  const osc1 = audioCtx.createOscillator();
-  osc1.type = 'sawtooth';
-  osc1.frequency.value = 90;
-
-  // Detuned companion — fattens the sound
-  const osc2 = audioCtx.createOscillator();
-  osc2.type = 'square';
-  osc2.frequency.value = 94;
-
-  // LFO — rhythmic wobble like an ion drive
-  const lfo = audioCtx.createOscillator();
-  lfo.type = 'sine';
-  lfo.frequency.value = 4;
-  const lfoAmt = audioCtx.createGain();
-  lfoAmt.gain.value = 5;
-  lfo.connect(lfoAmt);
-  lfoAmt.connect(osc1.frequency);
-  lfoAmt.connect(osc2.frequency);
-
+  const master = audioCtx.createGain(); master.gain.value = 0.018;
+  master.connect(dst());
+  const osc1 = audioCtx.createOscillator(); osc1.type = 'sawtooth'; osc1.frequency.value = 90;
+  const osc2 = audioCtx.createOscillator(); osc2.type = 'square';   osc2.frequency.value = 94;
+  const lfo  = audioCtx.createOscillator(); lfo.type  = 'sine';     lfo.frequency.value  = 4;
+  const lfoA = audioCtx.createGain(); lfoA.gain.value = 5;
+  lfo.connect(lfoA); lfoA.connect(osc1.frequency); lfoA.connect(osc2.frequency);
   const g1 = audioCtx.createGain(); g1.gain.value = 0.6;
   const g2 = audioCtx.createGain(); g2.gain.value = 0.4;
   osc1.connect(g1); g1.connect(master);
   osc2.connect(g2); g2.connect(master);
-
   osc1.start(); osc2.start(); lfo.start();
-  eng = { osc1, osc2, lfo, lfoAmt, master };
+  eng = { osc1, osc2, lfo, lfoA, master };
 }
 
 function stopEngine() {
@@ -137,73 +145,158 @@ function stopEngine() {
 
 function setEnginePitch(spd) {
   if (!eng.osc1) return;
-  const t = audioCtx.currentTime;
-  const f = 75 + spd * 13;
+  const t = audioCtx.currentTime, f = 75 + spd * 13;
   eng.osc1.frequency.setTargetAtTime(f,     t, 0.08);
   eng.osc2.frequency.setTargetAtTime(f + 5, t, 0.08);
   eng.lfo.frequency.setTargetAtTime(3.5 + spd * 0.35, t, 0.1);
 }
 
+// ── One-shot SFX ──
 function playCrash() {
   if (!audioCtx) return;
-  const t = audioCtx.currentTime;
-
-  // Noise burst — hull impact
-  const rate = audioCtx.sampleRate;
-  const len  = Math.floor(rate * 0.7);
-  const buf  = audioCtx.createBuffer(1, len, rate);
-  const d    = buf.getChannelData(0);
-  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 0.4);
-  const noise = audioCtx.createBufferSource();
-  noise.buffer = buf;
-  const ng = audioCtx.createGain(); ng.gain.value = 0.3;
-  noise.connect(ng); ng.connect(audioCtx.destination);
-  noise.start(t);
-
-  // Descending pitch sweep — engine dying
-  const sweep = audioCtx.createOscillator();
-  sweep.type = 'sawtooth';
-  sweep.frequency.setValueAtTime(480, t);
-  sweep.frequency.exponentialRampToValueAtTime(28, t + 1.0);
-  const sg = audioCtx.createGain();
-  sg.gain.setValueAtTime(0.22, t);
-  sg.gain.exponentialRampToValueAtTime(0.001, t + 1.0);
-  sweep.connect(sg); sg.connect(audioCtx.destination);
-  sweep.start(t); sweep.stop(t + 1.0);
+  const t = audioCtx.currentTime, rate = audioCtx.sampleRate;
+  const len = Math.floor(rate * 0.7), buf = audioCtx.createBuffer(1, len, rate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random()*2-1) * Math.pow(1-i/len, 0.4);
+  const noise = audioCtx.createBufferSource(); noise.buffer = buf;
+  const ng = audioCtx.createGain(); ng.gain.value = 0.4;
+  noise.connect(ng); ng.connect(dst()); noise.start(t);
+  const sweep = audioCtx.createOscillator(); sweep.type = 'sawtooth';
+  sweep.frequency.setValueAtTime(480, t); sweep.frequency.exponentialRampToValueAtTime(28, t+1.0);
+  const sg = audioCtx.createGain(); sg.gain.setValueAtTime(0.25, t); sg.gain.exponentialRampToValueAtTime(0.001, t+1.0);
+  sweep.connect(sg); sg.connect(dst()); sweep.start(t); sweep.stop(t+1.0);
 }
 
 function playStart() {
   if (!audioCtx) return;
   const t = audioCtx.currentTime;
-  // Ascending 4-note arpeggio — powering up
-  [[220, 0], [330, 0.09], [440, 0.18], [660, 0.27]].forEach(([freq, delay]) => {
-    const osc = audioCtx.createOscillator();
-    const g   = audioCtx.createGain();
-    osc.type = 'square';
-    osc.frequency.value = freq;
-    g.gain.setValueAtTime(0, t + delay);
-    g.gain.linearRampToValueAtTime(0.1, t + delay + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.18);
-    osc.connect(g); g.connect(audioCtx.destination);
-    osc.start(t + delay); osc.stop(t + delay + 0.18);
+  [[220,0],[330,0.09],[440,0.18],[660,0.27]].forEach(([freq, delay]) => {
+    const osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+    osc.type = 'square'; osc.frequency.value = freq;
+    g.gain.setValueAtTime(0, t+delay); g.gain.linearRampToValueAtTime(0.1, t+delay+0.02); g.gain.exponentialRampToValueAtTime(0.001, t+delay+0.18);
+    osc.connect(g); g.connect(dst()); osc.start(t+delay); osc.stop(t+delay+0.18);
   });
 }
 
 function playMilestone() {
   if (!audioCtx) return;
   const t = audioCtx.currentTime;
-  // Two-note chime
-  [[523, 0], [784, 0.13]].forEach(([freq, delay]) => {
-    const osc = audioCtx.createOscillator();
-    const g   = audioCtx.createGain();
-    osc.type = 'square';
-    osc.frequency.value = freq;
-    g.gain.setValueAtTime(0, t + delay);
-    g.gain.linearRampToValueAtTime(0.09, t + delay + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.001, t + delay + 0.22);
-    osc.connect(g); g.connect(audioCtx.destination);
-    osc.start(t + delay); osc.stop(t + delay + 0.22);
+  [[523,0],[784,0.13]].forEach(([freq, delay]) => {
+    const osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+    osc.type = 'square'; osc.frequency.value = freq;
+    g.gain.setValueAtTime(0, t+delay); g.gain.linearRampToValueAtTime(0.09, t+delay+0.02); g.gain.exponentialRampToValueAtTime(0.001, t+delay+0.22);
+    osc.connect(g); g.connect(dst()); osc.start(t+delay); osc.stop(t+delay+0.22);
   });
+}
+
+// ── Drum machines ──
+function mKick(t) {
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.frequency.setValueAtTime(155, t); o.frequency.exponentialRampToValueAtTime(35, t+0.12);
+  g.gain.setValueAtTime(0.9, t); g.gain.exponentialRampToValueAtTime(0.001, t+0.32);
+  o.connect(g); g.connect(dst()); o.start(t); o.stop(t+0.32);
+}
+
+function mSnare(t) {
+  const rate = audioCtx.sampleRate;
+  const buf  = audioCtx.createBuffer(1, Math.floor(rate*0.18), rate);
+  const d    = buf.getChannelData(0); for (let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+  const src  = audioCtx.createBufferSource(); src.buffer = buf;
+  const g    = audioCtx.createGain(); g.gain.setValueAtTime(0.28,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.18);
+  src.connect(g); g.connect(dst()); src.start(t);
+  const tone = audioCtx.createOscillator(), tg = audioCtx.createGain();
+  tone.frequency.value = 185; tg.gain.setValueAtTime(0.12,t); tg.gain.exponentialRampToValueAtTime(0.001,t+0.09);
+  tone.connect(tg); tg.connect(dst()); tone.start(t); tone.stop(t+0.09);
+}
+
+function mHat(t, open) {
+  const dur  = open ? 0.20 : 0.04;
+  const rate = audioCtx.sampleRate;
+  const buf  = audioCtx.createBuffer(1, Math.floor(rate*dur), rate);
+  const d    = buf.getChannelData(0); for (let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+  const src  = audioCtx.createBufferSource(); src.buffer = buf;
+  const hpf  = audioCtx.createBiquadFilter(); hpf.type='highpass'; hpf.frequency.value=8500;
+  const g    = audioCtx.createGain(); g.gain.setValueAtTime(open?0.13:0.10,t); g.gain.exponentialRampToValueAtTime(0.001,t+dur);
+  src.connect(hpf); hpf.connect(g); g.connect(dst()); src.start(t);
+}
+
+// ── Synth voices ──
+function ensureDelay() {
+  if (arpDelay) return;
+  arpDelay    = audioCtx.createDelay(1.0); arpDelay.delayTime.value = STEP_DUR * 3;
+  arpFeedback = audioCtx.createGain(); arpFeedback.gain.value = 0.32;
+  arpDelay.connect(arpFeedback); arpFeedback.connect(arpDelay); arpDelay.connect(dst());
+}
+
+function mBass(t, freq) {
+  const o = audioCtx.createOscillator(); o.type='sawtooth'; o.frequency.value=freq;
+  const f = audioCtx.createBiquadFilter(); f.type='lowpass'; f.Q.value=5;
+  f.frequency.setValueAtTime(800,t); f.frequency.exponentialRampToValueAtTime(120,t+STEP_DUR);
+  const g = audioCtx.createGain(); g.gain.setValueAtTime(0.5,t); g.gain.exponentialRampToValueAtTime(0.001,t+STEP_DUR*1.8);
+  o.connect(f); f.connect(g); g.connect(dst()); o.start(t); o.stop(t+STEP_DUR*2);
+}
+
+function mArp(t, freq) {
+  ensureDelay();
+  const o = audioCtx.createOscillator(); o.type='square'; o.frequency.value=freq;
+  const g = audioCtx.createGain(); g.gain.setValueAtTime(0.09,t); g.gain.exponentialRampToValueAtTime(0.001,t+STEP_DUR*0.8);
+  o.connect(g); g.connect(arpDelay); g.connect(dst());
+  o.start(t); o.stop(t+STEP_DUR);
+}
+
+// ── Ambient pad ──
+function startPad() {
+  if (!audioCtx || padNodes.length) return;
+  const g    = audioCtx.createGain();
+  g.gain.setValueAtTime(0, audioCtx.currentTime);
+  g.gain.linearRampToValueAtTime(0.055, audioCtx.currentTime+2.5);
+  const filt = audioCtx.createBiquadFilter(); filt.type='lowpass'; filt.frequency.value=350; filt.Q.value=2;
+  const lfo  = audioCtx.createOscillator(); lfo.type='sine'; lfo.frequency.value=0.07;
+  const lfoG = audioCtx.createGain(); lfoG.gain.value=180;
+  lfo.connect(lfoG); lfoG.connect(filt.frequency);
+  [55,110,164.8,220].forEach((freq,i) => {
+    const o = audioCtx.createOscillator(); o.type='sawtooth';
+    o.frequency.value = freq*(1+i*0.0012);
+    o.connect(filt); o.start(); padNodes.push(o);
+  });
+  filt.connect(g); g.connect(dst()); lfo.start(); padNodes.push(lfo);
+}
+
+function stopPad() {
+  padNodes.forEach(o => { try { o.stop(); } catch(e) {} });
+  padNodes = [];
+}
+
+// ── Sequencer ──
+function scheduleStep(step, t) {
+  const s = step % 16;
+  if (P_KICK[s])  mKick(t);
+  if (P_SNARE[s]) mSnare(t);
+  if (P_CHAT[s])  mHat(t, false);
+  if (P_OHAT[s])  mHat(t, true);
+  if (P_BASS[s])  mBass(t, P_BASS[s]);
+  if (P_ARP[s])   mArp(t, P_ARP[s]);
+}
+
+function musicTick() {
+  const now = audioCtx.currentTime;
+  while (nextBeat < now + 0.15) {
+    scheduleStep(musicStep, nextBeat);
+    nextBeat += STEP_DUR; musicStep++;
+  }
+  musicTimer = setTimeout(musicTick, 25);
+}
+
+function startMusic() {
+  if (!audioCtx) return;
+  stopMusic();
+  arpDelay = null; arpFeedback = null;
+  musicStep = 0; nextBeat = audioCtx.currentTime + 0.05;
+  musicTick();
+}
+
+function stopMusic() {
+  if (musicTimer) { clearTimeout(musicTimer); musicTimer = null; }
 }
 
 // ─── Tunnel ───────────────────────────────────────────────────────────────────
@@ -463,11 +556,13 @@ function startGame() {
   lastScoreMilestone = -1;
   state = 'playing';
   playStart();
-  setTimeout(startEngine, 400); // engine starts after arpeggio
+  setTimeout(() => { startEngine(); startPad(); startMusic(); }, 500);
 }
 
 function endGame() {
   stopEngine();
+  stopMusic();
+  stopPad();
   playCrash();
   if (score > highScore) {
     highScore = score;
