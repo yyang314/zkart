@@ -1,4 +1,4 @@
-const CACHE = 'zkart-20260401101916';
+const CACHE = 'zkart-20260401102535';
 const FILES = ['./', './index.html', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', e => {
@@ -12,6 +12,9 @@ self.addEventListener('activate', e => {
     caches.keys().then(keys =>
       Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
     ).then(() => clients.claim())
+    .then(() => self.clients.matchAll().then(all =>
+      all.forEach(c => c.postMessage('SW_UPDATED'))
+    ))
   );
 });
 
