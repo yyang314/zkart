@@ -2,6 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#00d4ff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <link rel="manifest" href="manifest.json">
   <title>Z-Kart</title>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
   <style>
@@ -365,7 +370,8 @@ function drawTitle() {
 
   ctx.fillStyle = '#90e0ef';
   ctx.font = '6px "Press Start 2P"';
-  ctx.fillText('\u2190 \u2192  ARROW KEYS', W / 2, 196);
+  ctx.fillText('\u2190 \u2192  ARROW KEYS', W / 2, 192);
+  ctx.fillText('TAP LEFT / RIGHT', W / 2, 208);
 
   ctx.fillStyle = '#ffd60a';
   ctx.font = '7px "Press Start 2P"';
@@ -392,6 +398,17 @@ function drawGame() {
   if (tunnelW < MIN_TUNNEL_W * 1.4 && Math.floor(Date.now() / 300) % 2 === 0) {
     ctx.fillStyle = 'rgba(255,50,50,0.06)';
     ctx.fillRect(0, 0, W, H);
+  }
+
+  // Subtle tap zone hints — fade out after 5 seconds
+  if (frameCount < 300) {
+    const alpha = Math.max(0, (1 - frameCount / 300) * 0.25);
+    ctx.fillStyle = `rgba(144,224,239,${alpha.toFixed(3)})`;
+    ctx.font = '10px "Press Start 2P"';
+    ctx.textAlign = 'left';
+    ctx.fillText('\u25C4', 10, H - 12);
+    ctx.textAlign = 'right';
+    ctx.fillText('\u25BA', W - 10, H - 12);
   }
 
   drawScanlines();
@@ -488,6 +505,38 @@ document.addEventListener('keydown', e => {
   else if (state === 'gameover') state = 'title';
 });
 document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+// ─── Touch Controls ───────────────────────────────────────────────────────────
+function getTouchCanvasX(clientX) {
+  const rect = canvas.getBoundingClientRect();
+  return (clientX - rect.left) * (W / rect.width);
+}
+
+function applyTouches(touches) {
+  keys.ArrowLeft  = false;
+  keys.ArrowRight = false;
+  for (const t of touches) {
+    if (getTouchCanvasX(t.clientX) < W / 2) keys.ArrowLeft  = true;
+    else                                     keys.ArrowRight = true;
+  }
+}
+
+document.addEventListener('touchstart', e => {
+  e.preventDefault();
+  initAudio();
+  applyTouches(e.touches);
+  if      (state === 'title')    startGame();
+  else if (state === 'gameover') state = 'title';
+}, { passive: false });
+
+document.addEventListener('touchmove',   e => { e.preventDefault(); applyTouches(e.touches); }, { passive: false });
+document.addEventListener('touchend',    e => { e.preventDefault(); applyTouches(e.touches); }, { passive: false });
+document.addEventListener('touchcancel', e => { e.preventDefault(); applyTouches(e.touches); }, { passive: false });
+
+// ─── Service Worker ────────────────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js');
+}
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 state = 'title';

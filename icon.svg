@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" fill="#000814"/>
+  <!-- Stars -->
+  <rect x="80"  y="60"  width="4" height="4" fill="white" opacity="0.5"/>
+  <rect x="420" y="110" width="3" height="3" fill="white" opacity="0.4"/>
+  <rect x="45"  y="280" width="3" height="3" fill="white" opacity="0.5"/>
+  <rect x="460" y="380" width="4" height="4" fill="white" opacity="0.6"/>
+  <rect x="150" y="420" width="3" height="3" fill="white" opacity="0.3"/>
+  <rect x="370" y="60"  width="2" height="2" fill="white" opacity="0.4"/>
+  <!-- Tunnel walls -->
+  <rect x="0"   y="0" width="136" height="512" fill="#0a1628"/>
+  <rect x="376" y="0" width="136" height="512" fill="#0a1628"/>
+  <!-- Neon edge -->
+  <rect x="134" y="0" width="3" height="512" fill="#00d4ff"/>
+  <rect x="375" y="0" width="3" height="512" fill="#00d4ff"/>
+  <!-- Ship body -->
+  <rect x="248" y="210" width="16" height="20" fill="#90e0ef"/>
+  <!-- Nose -->
+  <rect x="252" y="190" width="8"  height="20" fill="#90e0ef"/>
+  <!-- Wings -->
+  <rect x="200" y="238" width="48" height="20" fill="#90e0ef"/>
+  <rect x="264" y="238" width="48" height="20" fill="#90e0ef"/>
+  <!-- Cockpit -->
+  <rect x="252" y="218" width="8"  height="12" fill="#caf0f8"/>
+  <!-- Thrusters -->
+  <rect x="244" y="230" width="8"  height="16" fill="#90e0ef"/>
+  <rect x="260" y="230" width="8"  height="16" fill="#90e0ef"/>
+  <!-- Flames -->
+  <rect x="244" y="246" width="8"  height="24" fill="#f77f00"/>
+  <rect x="260" y="246" width="8"  height="24" fill="#ffd60a"/>
+</svg>

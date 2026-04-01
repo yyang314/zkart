@@ -1,0 +1,18 @@
+{
+  "name": "Z-Kart",
+  "short_name": "Z-Kart",
+  "description": "Navigate your ship through the narrowing cave!",
+  "start_url": "./index.html",
+  "display": "fullscreen",
+  "orientation": "portrait",
+  "background_color": "#000814",
+  "theme_color": "#00d4ff",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
