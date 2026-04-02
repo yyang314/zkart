@@ -824,6 +824,7 @@ function drawGame() {
   drawAsteroids();
   drawParticles();
   drawMissiles();
+  drawPowerup();
   drawShip(Math.round(shipX), SHIP_Y);
   drawHUD();
 
@@ -922,6 +923,7 @@ function loop() {
     updateAsteroids();
     updateMissiles();
     updateParticles();
+    updatePowerup();
     drawGame();
     if (checkCollision() || checkAsteroidCollision()) endGame();
     const milestone = Math.floor(score / 10);
