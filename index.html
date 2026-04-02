@@ -58,6 +58,7 @@ window.addEventListener('resize', resize);
 // ─── State ───────────────────────────────────────────────────────────────────
 let state; // 'title' | 'playing' | 'gameover'
 let score, shipX, speed, tunnelW, frameCount, driftVel;
+let asteroids = [], missiles = [], particles = [], asteroidCooldown = 200;
 let segments = [];
 let keys = {};
 let highScore = parseInt(localStorage.getItem('zkart_hs') || '0');
@@ -258,6 +259,31 @@ function playMilestone() {
   });
 }
 
+function playMissileSound() {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator(); osc.type = 'square';
+  osc.frequency.setValueAtTime(900, t); osc.frequency.exponentialRampToValueAtTime(400, t+0.09);
+  const g = audioCtx.createGain(); g.gain.setValueAtTime(0.07, t); g.gain.exponentialRampToValueAtTime(0.001, t+0.09);
+  osc.connect(g); g.connect(dst()); osc.start(t); osc.stop(t+0.09);
+}
+
+function playExplosionSound() {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime, rate = audioCtx.sampleRate;
+  const len = Math.floor(rate * 0.28);
+  const buf = audioCtx.createBuffer(1, len, rate);
+  const d   = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random()*2-1) * Math.pow(1-i/len, 0.6);
+  const src = audioCtx.createBufferSource(); src.buffer = buf;
+  const ng  = audioCtx.createGain(); ng.gain.value = 0.22;
+  src.connect(ng); ng.connect(dst()); src.start(t);
+  const sw  = audioCtx.createOscillator(); sw.type = 'sawtooth';
+  sw.frequency.setValueAtTime(280, t); sw.frequency.exponentialRampToValueAtTime(45, t+0.28);
+  const sg  = audioCtx.createGain(); sg.gain.setValueAtTime(0.14, t); sg.gain.exponentialRampToValueAtTime(0.001, t+0.28);
+  sw.connect(sg); sg.connect(dst()); sw.start(t); sw.stop(t+0.28);
+}
+
 // ── Drum machines ──
 function mKick(t) {
   const o = audioCtx.createOscillator(), g = audioCtx.createGain();
@@ -377,6 +403,7 @@ function initTunnel() {
   score     = 0;
   driftVel  = 0;
   initCraters();
+  asteroids = []; missiles = []; particles = []; asteroidCooldown = 200;
 
   let cx = W / 2;
   const count = Math.ceil(H / SEG_H) + 30;
@@ -429,6 +456,142 @@ function checkCollision() {
     if (lx < s.left || rx > s.right) return true;
   }
   return false;
+}
+
+// ─── Asteroids / Missiles / Particles ────────────────────────────────────────
+const MISSILE_SPEED = 8;
+const MISSILE_MAX   = 3;
+
+function wallBoundsAt(y) {
+  let wl = 0, wr = W, minD = Infinity;
+  for (const s of segments) {
+    const d = Math.abs(s.y - y);
+    if (d < minD) { minD = d; wl = s.left; wr = s.right; }
+  }
+  return [wl, wr];
+}
+
+function spawnAsteroid() {
+  const [wl, wr] = wallBoundsAt(0);
+  const r      = 9 + Math.random() * 9;
+  const margin = 18;
+  const span   = wr - wl - margin * 2 - r * 2;
+  if (span < 0) return;
+  const x = wl + margin + r + Math.random() * span;
+  const nPts = 7 + Math.floor(Math.random() * 3);
+  const pts  = [];
+  for (let i = 0; i < nPts; i++) {
+    const a = (i / nPts) * Math.PI * 2 + (Math.random() - 0.5) * (Math.PI / nPts);
+    pts.push([Math.cos(a) * r * (0.55 + Math.random() * 0.45),
+              Math.sin(a) * r * (0.55 + Math.random() * 0.45)]);
+  }
+  asteroids.push({ x, y: -r - 5, r, angle: Math.random() * Math.PI * 2, spin: (Math.random()-0.5)*0.022, pts });
+}
+
+function updateAsteroids() {
+  for (const a of asteroids) { a.y += speed; a.angle += a.spin; }
+  asteroids = asteroids.filter(a => a.y < H + a.r * 2);
+  if (--asteroidCooldown <= 0) {
+    spawnAsteroid();
+    asteroidCooldown = Math.floor(Math.max(70, 200 - frameCount / 22) + Math.random() * 90);
+  }
+}
+
+function fireMissile() {
+  if (state !== 'playing' || missiles.length >= MISSILE_MAX) return;
+  missiles.push({ x: shipX, y: SHIP_Y - 10 });
+  playMissileSound();
+}
+
+function updateMissiles() {
+  for (const m of missiles) m.y -= MISSILE_SPEED;
+  missiles = missiles.filter(m => m.y > -12);
+  for (let mi = missiles.length - 1; mi >= 0; mi--) {
+    const m = missiles[mi];
+    for (let ai = asteroids.length - 1; ai >= 0; ai--) {
+      const a = asteroids[ai];
+      const dx = m.x - a.x, dy = m.y - a.y;
+      if (dx*dx + dy*dy < (a.r + 3) * (a.r + 3)) {
+        spawnExplosion(a.x, a.y, a.r);
+        missiles.splice(mi, 1);
+        asteroids.splice(ai, 1);
+        playExplosionSound();
+        break;
+      }
+    }
+  }
+}
+
+function spawnExplosion(x, y, r) {
+  const count = 8 + Math.floor(r * 0.9);
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const spd   = 0.8 + Math.random() * 3;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * spd,
+      vy: Math.sin(angle) * spd - 1,
+      life: 1.0,
+      decay: 0.04 + Math.random() * 0.03,
+      r: 1 + Math.random() * (r * 0.28)
+    });
+  }
+}
+
+function updateParticles() {
+  for (const p of particles) {
+    p.x += p.vx; p.y += p.vy + speed * 0.5; p.vy += 0.06; p.life -= p.decay;
+  }
+  particles = particles.filter(p => p.life > 0);
+}
+
+function checkAsteroidCollision() {
+  for (const a of asteroids) {
+    const dx = shipX - a.x, dy = SHIP_Y - a.y;
+    if (dx*dx + dy*dy < (a.r + SHIP_W * 0.5) * (a.r + SHIP_W * 0.5)) return true;
+  }
+  return false;
+}
+
+function drawAsteroids() {
+  for (const a of asteroids) {
+    ctx.save();
+    ctx.translate(a.x, a.y);
+    ctx.rotate(a.angle);
+    ctx.beginPath();
+    ctx.moveTo(a.pts[0][0], a.pts[0][1]);
+    for (let i = 1; i < a.pts.length; i++) ctx.lineTo(a.pts[i][0], a.pts[i][1]);
+    ctx.closePath();
+    ctx.fillStyle = '#28273a';
+    ctx.fill();
+    ctx.strokeStyle = '#6e6ea0';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // Highlight
+    ctx.beginPath();
+    ctx.arc(-a.r * 0.25, -a.r * 0.25, a.r * 0.28, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)';
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawMissiles() {
+  ctx.shadowColor = '#00ffff'; ctx.shadowBlur = 10;
+  for (const m of missiles) {
+    ctx.fillStyle = '#00ffff'; ctx.fillRect(m.x - 1, m.y - 8, 2, 3);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(m.x - 1, m.y - 5, 2, 7);
+    ctx.fillStyle = 'rgba(255,180,40,0.75)'; ctx.fillRect(m.x - 1, m.y + 2, 2, 3);
+  }
+  ctx.shadowBlur = 0;
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    const g = Math.floor(Math.min(255, p.life * 210));
+    ctx.fillStyle = `rgba(255,${g},20,${p.life.toFixed(2)})`;
+    ctx.fillRect(p.x - p.r * 0.5, p.y - p.r * 0.5, p.r, p.r);
+  }
 }
 
 // ─── Drawing ──────────────────────────────────────────────────────────────────
@@ -583,6 +746,9 @@ function drawGame() {
   ctx.fillRect(0, 0, W, H);
   drawStars();
   drawTunnel();
+  drawAsteroids();
+  drawParticles();
+  drawMissiles();
   drawShip(Math.round(shipX), SHIP_Y);
   drawHUD();
 
@@ -678,8 +844,11 @@ function loop() {
     updateTunnel();
     updateStars();
     updateShip();
+    updateAsteroids();
+    updateMissiles();
+    updateParticles();
     drawGame();
-    if (checkCollision()) endGame();
+    if (checkCollision() || checkAsteroidCollision()) endGame();
     const milestone = Math.floor(score / 10);
     if (milestone > lastScoreMilestone && score > 0) {
       lastScoreMilestone = milestone;
@@ -697,6 +866,7 @@ document.addEventListener('keydown', e => {
   keys[e.key] = true;
   if      (state === 'title')    startGame();
   else if (state === 'gameover') state = 'title';
+  else if (state === 'playing' && e.key === ' ' && !e.repeat) fireMissile();
 });
 document.addEventListener('keyup', e => { keys[e.key] = false; });
 
@@ -715,17 +885,34 @@ function applyTouches(touches) {
   }
 }
 
+const touchTimes = {};
+
 document.addEventListener('touchstart', e => {
   e.preventDefault();
   initAudio();
+  for (const t of e.changedTouches) touchTimes[t.identifier] = Date.now();
   applyTouches(e.touches);
   if      (state === 'title')    startGame();
   else if (state === 'gameover') state = 'title';
 }, { passive: false });
 
-document.addEventListener('touchmove',   e => { e.preventDefault(); applyTouches(e.touches); }, { passive: false });
-document.addEventListener('touchend',    e => { e.preventDefault(); applyTouches(e.touches); }, { passive: false });
-document.addEventListener('touchcancel', e => { e.preventDefault(); applyTouches(e.touches); }, { passive: false });
+document.addEventListener('touchmove', e => { e.preventDefault(); applyTouches(e.touches); }, { passive: false });
+
+document.addEventListener('touchend', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const dur = Date.now() - (touchTimes[t.identifier] || 0);
+    delete touchTimes[t.identifier];
+    if (state === 'playing' && dur < 180) fireMissile();
+  }
+  applyTouches(e.touches);
+}, { passive: false });
+
+document.addEventListener('touchcancel', e => {
+  e.preventDefault();
+  for (const t of e.changedTouches) delete touchTimes[t.identifier];
+  applyTouches(e.touches);
+}, { passive: false });
 
 // ─── Service Worker ────────────────────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
