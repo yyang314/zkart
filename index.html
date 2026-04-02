@@ -59,6 +59,7 @@ window.addEventListener('resize', resize);
 let state; // 'title' | 'playing' | 'gameover'
 let score, shipX, speed, tunnelW, frameCount, driftVel;
 let asteroids = [], missiles = [], particles = [], asteroidCooldown = 200;
+let powerup = null, powerupTimer = 3000, powerupFlash = 0;
 let segments = [];
 let keys = {};
 let highScore = parseInt(localStorage.getItem('zkart_hs') || '0');
@@ -404,6 +405,7 @@ function initTunnel() {
   driftVel  = 0;
   initCraters();
   asteroids = []; missiles = []; particles = []; asteroidCooldown = 200;
+  powerup = null; powerupTimer = 3000; powerupFlash = 0;
 
   let cx = W / 2;
   const count = Math.ceil(H / SEG_H) + 30;
@@ -592,6 +594,68 @@ function drawParticles() {
     ctx.fillStyle = `rgba(255,${g},20,${p.life.toFixed(2)})`;
     ctx.fillRect(p.x - p.r * 0.5, p.y - p.r * 0.5, p.r, p.r);
   }
+}
+
+// ─── Powerup ─────────────────────────────────────────────────────────────────
+function playPowerupSound() {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  [[330,0],[440,0.07],[550,0.14],[660,0.21],[880,0.28]].forEach(([freq, delay]) => {
+    const osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+    osc.type = 'square'; osc.frequency.value = freq;
+    g.gain.setValueAtTime(0, t+delay); g.gain.linearRampToValueAtTime(0.12, t+delay+0.02); g.gain.exponentialRampToValueAtTime(0.001, t+delay+0.15);
+    osc.connect(g); g.connect(dst()); osc.start(t+delay); osc.stop(t+delay+0.15);
+  });
+}
+
+function spawnPowerup() {
+  const [wl, wr] = wallBoundsAt(0);
+  powerup = { x: (wl + wr) / 2, y: -18, r: 10, pulse: 0 };
+}
+
+function collectPowerup() {
+  tunnelW = Math.min(INIT_TUNNEL_W, Math.max(tunnelW * 1.5, tunnelW + 40));
+  powerup = null;
+  powerupTimer = 3000;
+  powerupFlash = 40;
+  playPowerupSound();
+}
+
+function updatePowerup() {
+  if (--powerupTimer <= 0 && !powerup) spawnPowerup();
+  if (!powerup) return;
+  powerup.y += speed;
+  powerup.pulse += 0.09;
+  if (powerup.y > H + powerup.r * 2) { powerup = null; powerupTimer = 3000; return; }
+  const dx = shipX - powerup.x, dy = SHIP_Y - powerup.y;
+  if (dx*dx + dy*dy < (powerup.r + SHIP_W * 0.6) * (powerup.r + SHIP_W * 0.6)) collectPowerup();
+}
+
+function drawPowerup() {
+  if (!powerup) return;
+  const { x, y, r, pulse } = powerup;
+  const wobble = Math.sin(pulse) * 3;
+
+  // Outer glow ring
+  ctx.shadowColor = '#00ff66'; ctx.shadowBlur = 18 + wobble;
+  ctx.beginPath(); ctx.arc(x, y, r + 4 + wobble, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(0,255,102,0.35)'; ctx.lineWidth = 3; ctx.stroke();
+
+  // Core disc
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = '#00ff66'; ctx.fill();
+
+  // Inner highlight
+  ctx.beginPath(); ctx.arc(x - r*0.28, y - r*0.28, r*0.38, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fill();
+
+  // "+" symbol
+  const hw = r * 0.52, th = r * 0.22;
+  ctx.fillStyle = '#003a18';
+  ctx.fillRect(x - hw, y - th, hw*2, th*2);  // horizontal bar
+  ctx.fillRect(x - th, y - hw, th*2, hw*2);  // vertical bar
+
+  ctx.shadowBlur = 0;
 }
 
 // ─── Drawing ──────────────────────────────────────────────────────────────────
