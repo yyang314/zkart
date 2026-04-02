@@ -614,7 +614,7 @@ function spawnPowerup() {
 }
 
 function collectPowerup() {
-  tunnelW = Math.min(INIT_TUNNEL_W, Math.max(tunnelW * 1.5, tunnelW + 40));
+  frameCount = Math.max(0, frameCount - 800); // roll back ~13s of narrowing
   powerup = null;
   powerupTimer = 900;
   powerupFlash = 40;
