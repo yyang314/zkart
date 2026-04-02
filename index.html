@@ -770,10 +770,10 @@ function drawTitle() {
 
   // Panel
   ctx.fillStyle = 'rgba(0,8,20,0.92)';
-  ctx.fillRect(18, 72, W - 36, 236);
+  ctx.fillRect(18, 72, W - 36, 270);
   ctx.strokeStyle = '#00d4ff';
   ctx.lineWidth = 2;
-  ctx.strokeRect(18, 72, W - 36, 236);
+  ctx.strokeRect(18, 72, W - 36, 270);
 
   // Title
   ctx.fillStyle = '#00d4ff';
@@ -792,9 +792,20 @@ function drawTitle() {
   ctx.fillText('\u2190 \u2192  ARROW KEYS', W / 2, 192);
   ctx.fillText('TAP LEFT / RIGHT', W / 2, 208);
 
+  // Gameplay hints
+  ctx.fillStyle = '#aaa';
+  ctx.font = '5px "Press Start 2P"';
+  ctx.fillText('\u2605 SHOOT ASTEROIDS \u2022 SPACE / TAP', W / 2, 232);
+  ctx.fillStyle = '#ff6b6b';
+  ctx.font = '5px "Press Start 2P"';
+  ctx.fillText('\u26a0 AVOID ASTEROID IMPACTS', W / 2, 248);
+  ctx.fillStyle = '#00ff66';
+  ctx.font = '5px "Press Start 2P"';
+  ctx.fillText('\u25cf COLLECT POWERUPS TO WIDEN TUNNEL', W / 2, 264);
+
   ctx.fillStyle = '#ffd60a';
   ctx.font = '7px "Press Start 2P"';
-  ctx.fillText('BEST: ' + String(highScore).padStart(5, '0'), W / 2, 272);
+  ctx.fillText('BEST: ' + String(highScore).padStart(5, '0'), W / 2, 306);
 
   if (Math.floor(Date.now() / 600) % 2 === 0) {
     ctx.fillStyle = '#00ff88';

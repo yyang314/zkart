@@ -1,4 +1,4 @@
-const CACHE = 'zkart-20260402090326';
+const CACHE = 'zkart-20260402090923';
 const FILES = ['./', './index.html', './manifest.json', './icon.svg'];
 
 self.addEventListener('install', e => {
