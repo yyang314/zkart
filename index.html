@@ -157,27 +157,60 @@ function drawCraters() {
 
 // ─── Wall Decorations ────────────────────────────────────────────────────────
 let decorPool = [];
-const DECOR_TYPES = ['alien','alien','slug','slug','rover','lander'];
+const DECOR_TYPES = ['alien','alien','dog','dog','rover','lander'];
+const BONE_REACH = 26; // local-space px the bone extends into the tunnel
 
 function makeDecor(spawnY) {
+  const type  = DECOR_TYPES[Math.floor(Math.random() * DECOR_TYPES.length)];
+  const side  = Math.random() < 0.5 ? -1 : 1;
+  const isDog = type === 'dog';
   return {
     spawnY,
-    side:  Math.random() < 0.5 ? -1 : 1,
-    frac:  0.08 + Math.random() * 0.82,   // fraction across wall width (0=inner edge, 1=outer)
-    type:  DECOR_TYPES[Math.floor(Math.random() * DECOR_TYPES.length)],
-    scale: 0.65 + Math.random() * 0.55,
-    flip:  Math.random() < 0.5
+    side,
+    type,
+    frac:          isDog ? 0.04 : 0.08 + Math.random() * 0.82,
+    scale:         0.65 + Math.random() * 0.55,
+    flip:          isDog ? (side === 1) : Math.random() < 0.5,
+    boneCollected: false
   };
 }
 
 function initDecors() {
   decorPool = [];
-  for (let i = 0; i < 18; i++) decorPool.push(makeDecor(-Math.random() * H));
+  for (let i = 0; i < 5; i++) decorPool.push(makeDecor(-Math.random() * H));
 }
 
 function updateDecors() {
   decorPool = decorPool.filter(d => worldY - d.spawnY < H + 40);
-  while (decorPool.length < 18) decorPool.push(makeDecor(worldY));
+  while (decorPool.length < 5) decorPool.push(makeDecor(worldY));
+
+  // Dog bone collision
+  for (const d of decorPool) {
+    if (d.type !== 'dog' || d.boneCollected) continue;
+    const sy = worldY - d.spawnY;
+    if (sy < -20 || sy > H + 20) continue;
+    let wallLeft = 0, wallRight = W, minD = Infinity;
+    for (const s of segments) {
+      const dd = Math.abs(s.y - sy);
+      if (dd < minD) { minD = dd; wallLeft = s.left; wallRight = s.right; }
+    }
+    let cx;
+    if (d.side === -1) {
+      const wallW = wallLeft;
+      if (wallW < 18) continue;
+      cx = wallW * (1 - d.frac);
+    } else {
+      const wallW = W - wallRight;
+      if (wallW < 18) continue;
+      cx = wallRight + wallW * d.frac;
+    }
+    const tipX = d.side === -1 ? cx + BONE_REACH * d.scale : cx - BONE_REACH * d.scale;
+    const dx = shipX - tipX, dy = SHIP_Y - sy;
+    if (dx*dx + dy*dy < 16*16) {
+      d.boneCollected = true;
+      scoreOffset += 300; // +5 score
+    }
+  }
 }
 
 function drawDecors() {
@@ -208,7 +241,7 @@ function drawDecors() {
       case 'alien':  drawDecoAlien();  break;
       case 'rover':  drawDecoRover();  break;
       case 'lander': drawDecoLander(); break;
-      case 'slug':   drawDecoSlug();   break;
+      case 'dog':    drawDecoDog(d.boneCollected); break;
     }
     ctx.restore();
   }
@@ -318,36 +351,63 @@ function drawDecoLander() {
   });
 }
 
-function drawDecoSlug() {
-  // Slime trail
-  ctx.strokeStyle='rgba(120,255,80,0.28)'; ctx.lineWidth=2;
-  ctx.beginPath(); ctx.moveTo(12,2); ctx.quadraticCurveTo(18,0,24,3); ctx.stroke();
-  // Body segments (back to front)
-  const segs=[{x:10,r:3.5},{x:5,r:4.2},{x:0,r:4.8},{x:-5,r:4.5},{x:-10,r:4}];
-  segs.forEach(({x,r},i) => {
-    const t = i/4;
-    ctx.fillStyle=`rgba(${90+i*12},${25+i*8},${110+i*10},0.92)`;
-    ctx.beginPath(); ctx.arc(x,0,r,0,Math.PI*2); ctx.fill();
-  });
-  // Cilia / feet
-  ctx.strokeStyle='#7a3fa0'; ctx.lineWidth=0.9;
-  for(let i=0;i<7;i++){
-    const bx=-9+i*3.2;
-    ctx.beginPath(); ctx.moveTo(bx,3.5); ctx.lineTo(bx-0.5,8); ctx.stroke();
+function drawDecoDog(boneCollected) {
+  // Legs
+  ctx.fillStyle = '#ccc';
+  ctx.fillRect(-11, 5, 4, 7);
+  ctx.fillRect(-5, 5, 4, 7);
+  // Boots
+  ctx.fillStyle = '#888';
+  ctx.fillRect(-12, 11, 6, 3);
+  ctx.fillRect(-6, 11, 6, 3);
+  // Puffy suit body
+  ctx.fillStyle = '#e2e2e2';
+  ctx.beginPath(); ctx.ellipse(-7, 0, 7, 6, 0, 0, Math.PI*2); ctx.fill();
+  // Chest panel
+  ctx.fillStyle = '#aaa';
+  ctx.fillRect(-12, -2, 4, 5);
+  ctx.fillStyle = '#55aaff';
+  ctx.fillRect(-11, -1, 2, 2);
+  // Left arm (tucked)
+  ctx.fillStyle = '#d0d0d0';
+  ctx.beginPath(); ctx.ellipse(-13, 1, 2.5, 4.5, -0.3, 0, Math.PI*2); ctx.fill();
+  // Right arm reaching into tunnel
+  ctx.strokeStyle = '#d0d0d0'; ctx.lineWidth = 4.5;
+  ctx.beginPath(); ctx.moveTo(-2, -1); ctx.lineTo(11, 1); ctx.stroke();
+  // Glove
+  ctx.fillStyle = '#888';
+  ctx.beginPath(); ctx.arc(11, 1, 3, 0, Math.PI*2); ctx.fill();
+  // Bone (only if not collected)
+  if (!boneCollected) {
+    ctx.strokeStyle = '#f0ddb0'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(13, 1); ctx.lineTo(25, 1); ctx.stroke();
+    ctx.fillStyle = '#f0ddb0';
+    [[12,-1.5],[12,3.5],[25,-1.5],[25,3.5]].forEach(([bx,by]) => {
+      ctx.beginPath(); ctx.arc(bx, by, 2.8, 0, Math.PI*2); ctx.fill();
+    });
   }
-  // Head
-  ctx.fillStyle='#8c50b8';
-  ctx.beginPath(); ctx.ellipse(-13,0,6,5,0,0,Math.PI*2); ctx.fill();
-  // Eyestalks
-  ctx.strokeStyle='#aa70d0'; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.moveTo(-15,-3); ctx.lineTo(-18,-9); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(-12,-4); ctx.lineTo(-13,-10); ctx.stroke();
-  ctx.fillStyle='#111';
-  ctx.beginPath(); ctx.arc(-18,-9,1.8,0,Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.arc(-13,-10,1.8,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='rgba(255,255,255,0.55)';
-  ctx.beginPath(); ctx.arc(-17.2,-9.8,0.7,0,Math.PI*2); ctx.fill();
-  ctx.beginPath(); ctx.arc(-12.2,-10.8,0.7,0,Math.PI*2); ctx.fill();
+  // Helmet
+  ctx.fillStyle = '#e8e8e8';
+  ctx.beginPath(); ctx.arc(-7, -9, 8, 0, Math.PI*2); ctx.fill();
+  // Visor
+  ctx.fillStyle = 'rgba(90,190,255,0.5)';
+  ctx.beginPath(); ctx.arc(-7, -9, 5.5, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  ctx.beginPath(); ctx.arc(-9, -11, 2, 0, Math.PI*2); ctx.fill();
+  // Floppy ear
+  ctx.fillStyle = '#c8a878';
+  ctx.beginPath(); ctx.moveTo(-12,-13); ctx.bezierCurveTo(-17,-11,-16,-5,-13,-7); ctx.closePath(); ctx.fill();
+  // Dog face inside visor
+  ctx.fillStyle = '#c8a878';
+  ctx.beginPath(); ctx.ellipse(-5, -8, 3, 2, 0.2, 0, Math.PI*2); ctx.fill(); // snout
+  ctx.fillStyle = '#333';
+  ctx.beginPath(); ctx.arc(-4.5, -9, 1, 0, Math.PI*2); ctx.fill(); // nose
+  ctx.beginPath(); ctx.arc(-9, -10.5, 1, 0, Math.PI*2); ctx.fill(); // eye
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.beginPath(); ctx.arc(-8.4, -11, 0.5, 0, Math.PI*2); ctx.fill(); // eye shine
+  // Tongue
+  ctx.fillStyle = '#ff6080';
+  ctx.beginPath(); ctx.ellipse(-4.5, -6.5, 1.5, 2, 0.1, 0, Math.PI*2); ctx.fill();
 }
 
 // ─── Audio ───────────────────────────────────────────────────────────────────
