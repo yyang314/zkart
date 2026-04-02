@@ -57,7 +57,7 @@ window.addEventListener('resize', resize);
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let state; // 'title' | 'playing' | 'gameover'
-let score, shipX, speed, tunnelW, frameCount, driftVel;
+let score, shipX, speed, tunnelW, frameCount, driftVel, scoreOffset;
 let asteroids = [], missiles = [], particles = [], asteroidCooldown = 200;
 let powerup = null, powerupTimer = 900, powerupFlash = 0;
 let segments = [];
@@ -402,6 +402,7 @@ function initTunnel() {
   speed     = INIT_SPEED;
   frameCount = 0;
   score     = 0;
+  scoreOffset = 0;
   driftVel  = 0;
   initCraters();
   asteroids = []; missiles = []; particles = []; asteroidCooldown = 200;
@@ -428,7 +429,7 @@ function addSegment() {
 
 function updateTunnel() {
   frameCount++;
-  score = Math.floor(frameCount / 60);
+  score = Math.floor((frameCount + scoreOffset) / 60);
 
   tunnelW = Math.max(MIN_TUNNEL_W, INIT_TUNNEL_W - frameCount * 0.075);
   speed   = Math.min(MAX_SPEED, INIT_SPEED + frameCount * 0.0008);
@@ -614,7 +615,9 @@ function spawnPowerup() {
 }
 
 function collectPowerup() {
-  frameCount = Math.max(0, frameCount - 800); // roll back ~13s of narrowing
+  const rollback = Math.min(frameCount, 800);
+  frameCount -= rollback;
+  scoreOffset += rollback; // preserve score
   powerup = null;
   powerupTimer = 900;
   powerupFlash = 40;
