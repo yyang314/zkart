@@ -59,7 +59,7 @@ window.addEventListener('resize', resize);
 let state; // 'title' | 'playing' | 'gameover'
 let score, shipX, speed, tunnelW, frameCount, driftVel;
 let asteroids = [], missiles = [], particles = [], asteroidCooldown = 200;
-let powerup = null, powerupTimer = 3000, powerupFlash = 0;
+let powerup = null, powerupTimer = 900, powerupFlash = 0;
 let segments = [];
 let keys = {};
 let highScore = parseInt(localStorage.getItem('zkart_hs') || '0');
@@ -405,7 +405,7 @@ function initTunnel() {
   driftVel  = 0;
   initCraters();
   asteroids = []; missiles = []; particles = []; asteroidCooldown = 200;
-  powerup = null; powerupTimer = 3000; powerupFlash = 0;
+  powerup = null; powerupTimer = 900; powerupFlash = 0;
 
   let cx = W / 2;
   const count = Math.ceil(H / SEG_H) + 30;
@@ -430,7 +430,7 @@ function updateTunnel() {
   frameCount++;
   score = Math.floor(frameCount / 60);
 
-  tunnelW = Math.max(MIN_TUNNEL_W, INIT_TUNNEL_W - frameCount * 0.025);
+  tunnelW = Math.max(MIN_TUNNEL_W, INIT_TUNNEL_W - frameCount * 0.075);
   speed   = Math.min(MAX_SPEED, INIT_SPEED + frameCount * 0.0008);
   setEnginePitch(speed);
 
@@ -616,7 +616,7 @@ function spawnPowerup() {
 function collectPowerup() {
   tunnelW = Math.min(INIT_TUNNEL_W, Math.max(tunnelW * 1.5, tunnelW + 40));
   powerup = null;
-  powerupTimer = 3000;
+  powerupTimer = 900;
   powerupFlash = 40;
   playPowerupSound();
 }
@@ -626,7 +626,7 @@ function updatePowerup() {
   if (!powerup) return;
   powerup.y += speed;
   powerup.pulse += 0.09;
-  if (powerup.y > H + powerup.r * 2) { powerup = null; powerupTimer = 3000; return; }
+  if (powerup.y > H + powerup.r * 2) { powerup = null; powerupTimer = 900; return; }
   const dx = shipX - powerup.x, dy = SHIP_Y - powerup.y;
   if (dx*dx + dy*dy < (powerup.r + SHIP_W * 0.6) * (powerup.r + SHIP_W * 0.6)) collectPowerup();
 }
